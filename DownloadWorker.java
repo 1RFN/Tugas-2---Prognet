@@ -8,6 +8,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -20,23 +22,35 @@ import javax.swing.SwingWorker;
  * Pola download sama dengan Modul 2:
  *   URL -> URLConnection -> getInputStream() -> FileOutputStream
  * dengan buffer 4096 byte dan try-with-resources (Modul 1).
+ *
+ * Dilengkapi deteksi otomatis jenis file (ZIP vs Non-ZIP) menggunakan
+ * HTTP Header serta ZipHelper (magic number 0x504B0304).
  */
 public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
 
     /** Data kemajuan yang dikirim dari thread download ke thread GUI. */
     public static class Update {
-        final int percent;      // 0-100, atau -1 jika ukuran file tidak diketahui
+        final int percent;          // 0-100, atau -1 jika ukuran file tidak diketahui
         final String status;
+        final String sizeInfo;
+        final String speedInfo;
+        final String fileTypeInfo;
 
-        Update(int percent, String status) {
+        Update(int percent, String status, String sizeInfo, String speedInfo, String fileTypeInfo) {
             this.percent = percent;
             this.status = status;
+            this.sizeInfo = sizeInfo;
+            this.speedInfo = speedInfo;
+            this.fileTypeInfo = fileTypeInfo;
         }
     }
 
     /** Dipanggil di thread GUI, jadi aman untuk mengubah komponen Swing. */
     public interface Listener {
         void onUpdate(int percent, String status);
+        default void onDetailedUpdate(Update update) {
+            onUpdate(update.percent, update.status);
+        }
         void onDone(File file);
         void onError(Throwable error);
         void onCancelled();
@@ -48,10 +62,36 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
     private final File folder;
     private final Listener listener;
 
+    private volatile String detectedFileName = "-";
+    private volatile String detectedContentType = "-";
+    private volatile String detectedCategory = "-";
+    private volatile long totalBytesRead = 0;
+    private volatile String averageSpeedText = "-";
+
     public DownloadWorker(String urlText, File folder, Listener listener) {
         this.urlText = urlText;
         this.folder = folder;
         this.listener = listener;
+    }
+
+    public String getDetectedFileName() {
+        return detectedFileName;
+    }
+
+    public String getDetectedContentType() {
+        return detectedContentType;
+    }
+
+    public String getDetectedCategory() {
+        return detectedCategory;
+    }
+
+    public long getTotalBytesRead() {
+        return totalBytesRead;
+    }
+
+    public String getAverageSpeedText() {
+        return averageSpeedText;
     }
 
     // ------------------------------------------------------------------
@@ -75,15 +115,28 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
             }
         }
 
+        String rawContentType = connection.getContentType();
+        String cleanMime = FileTypeFilter.normalizeMime(rawContentType);
+        detectedContentType = cleanMime.isEmpty() ? "application/octet-stream" : cleanMime;
+
+        String resolvedName = resolveFileName(url, connection, detectedContentType);
+        detectedFileName = resolvedName;
+        detectedCategory = FileTypeFilter.detectCategoryLabel(resolvedName, detectedContentType, null);
+
         long total = connection.getContentLengthLong();     // -1 jika tidak diketahui
 
         if (!folder.exists() && !folder.mkdirs()) {
             throw new IOException("Folder tujuan tidak dapat dibuat: " + folder);
         }
-        File target = uniqueFile(folder, fileNameFromUrl(url));
+        File target = uniqueFile(folder, resolvedName);
+        detectedFileName = target.getName();
 
         boolean finished = false;
         long totalRead = 0;
+        long startTimeNs = System.nanoTime();
+        long lastPublishMs = 0;
+
+        String typeDisplay = detectedCategory + " (" + detectedContentType + ")";
 
         try (InputStream in = new BufferedInputStream(connection.getInputStream());
              OutputStream out = new BufferedOutputStream(new FileOutputStream(target))) {
@@ -98,27 +151,55 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
                 }
                 out.write(buffer, 0, bytesRead);
                 totalRead += bytesRead;
+                totalBytesRead = totalRead;
+
+                long nowMs = System.currentTimeMillis();
+                double elapsedSec = Math.max(0.001, (System.nanoTime() - startTimeNs) / 1_000_000_000.0);
+                long speedBps = (long) (totalRead / elapsedSec);
 
                 if (total > 0) {
-                    int percent = (int) (totalRead * 100 / total);
-                    if (percent != lastPercent) {       // kirim hanya jika persen berubah
+                    int percent = (int) Math.min(100, (totalRead * 100 / total));
+                    if (percent != lastPercent || (nowMs - lastPublishMs) >= 200) {
                         lastPercent = percent;
-                        publish(new Update(percent, "Mengunduh... "
-                                + formatSize(totalRead) + " / " + formatSize(total)));
+                        lastPublishMs = nowMs;
+                        String sizeStr = formatSize(totalRead) + " / " + formatSize(total);
+                        String speedStr = formatSpeed(speedBps) + formatEta(total - totalRead, speedBps);
+                        String statusStr = "Mengunduh " + target.getName() + " (" + percent + "%)";
+                        publish(new Update(percent, statusStr, sizeStr, speedStr, typeDisplay));
                     }
                 } else {
-                    publish(new Update(-1, "Mengunduh... " + formatSize(totalRead)
-                            + " (ukuran total tidak diketahui)"));
+                    if ((nowMs - lastPublishMs) >= 150) {
+                        lastPublishMs = nowMs;
+                        String sizeStr = formatSize(totalRead) + " / Tidak diketahui";
+                        String speedStr = formatSpeed(speedBps);
+                        String statusStr = "Mengunduh " + target.getName() + "...";
+                        publish(new Update(-1, statusStr, sizeStr, speedStr, typeDisplay));
+                    }
                 }
             }
             out.flush();
             finished = true;
+
+            double totalElapsedSec = Math.max(0.05, (System.nanoTime() - startTimeNs) / 1_000_000_000.0);
+            averageSpeedText = formatSpeed((long) (totalRead / totalElapsedSec));
         } finally {
             // Jika gagal atau dibatalkan, jangan tinggalkan file setengah jadi
             if (!finished && target.exists()) {
                 target.delete();
             }
         }
+
+        // Setelah stream ditutup, periksa apakah file adalah ZIP menggunakan ZipHelper (magic number 0x504B0304)
+        if (ZipHelper.isZip(target) && target.getName().endsWith(".bin")) {
+            String baseName = target.getName().substring(0, target.getName().length() - 4);
+            File renamedZip = uniqueFile(folder, baseName + ".zip");
+            if (target.renameTo(renamedZip)) {
+                target = renamedZip;
+                detectedFileName = target.getName();
+            }
+        }
+
+        detectedCategory = FileTypeFilter.detectCategoryLabel(target.getName(), detectedContentType, target);
         return target;
     }
 
@@ -128,7 +209,7 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
     @Override
     protected void process(List<Update> updates) {
         Update last = updates.get(updates.size() - 1);
-        listener.onUpdate(last.percent, last.status);
+        listener.onDetailedUpdate(last);
     }
 
     @Override
@@ -149,14 +230,81 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
     //  Fungsi bantu
     // ------------------------------------------------------------------
 
+    /**
+     * Menentukan nama file dari header Content-Disposition atau dari path URL,
+     * serta melengkapi ekstensi berdasarkan MIME Content-Type jika belum ada.
+     */
+    private static String resolveFileName(URL url, URLConnection connection, String cleanMime) {
+        String disposition = connection.getHeaderField("Content-Disposition");
+        if (disposition != null) {
+            String fromHeader = parseContentDispositionFileName(disposition);
+            if (!fromHeader.isEmpty()) {
+                return sanitizeFileName(fromHeader, cleanMime);
+            }
+        }
+        return sanitizeFileName(fileNameFromUrl(url), cleanMime);
+    }
+
+    private static String parseContentDispositionFileName(String header) {
+        String lower = header.toLowerCase();
+        int idxStar = lower.indexOf("filename*=");
+        if (idxStar >= 0) {
+            String value = header.substring(idxStar + 10).trim();
+            int semi = value.indexOf(';');
+            if (semi >= 0) {
+                value = value.substring(0, semi).trim();
+            }
+            int quoteIdx = value.indexOf("''");
+            if (quoteIdx >= 0) {
+                value = value.substring(quoteIdx + 2);
+            }
+            try {
+                return URLDecoder.decode(value.replace("\"", ""), StandardCharsets.UTF_8.name());
+            } catch (Exception ignored) {
+                return value.replace("\"", "");
+            }
+        }
+        int idx = lower.indexOf("filename=");
+        if (idx >= 0) {
+            String value = header.substring(idx + 9).trim();
+            int semi = value.indexOf(';');
+            if (semi >= 0) {
+                value = value.substring(0, semi).trim();
+            }
+            return value.replace("\"", "").trim();
+        }
+        return "";
+    }
+
     /** Mengambil nama file dari path URL. Contoh: .../a/data.zip -> data.zip */
     private static String fileNameFromUrl(URL url) {
         String path = url.getPath();
+        try {
+            path = URLDecoder.decode(path, StandardCharsets.UTF_8.name());
+        } catch (Exception ignored) {
+        }
         String name = path.substring(path.lastIndexOf('/') + 1);
         if (name.isEmpty()) {
-            name = "download.bin";
+            name = "download";
         }
-        return name.replaceAll("[\\\\/:*?\"<>|]", "_");
+        return name;
+    }
+
+    private static String sanitizeFileName(String rawName, String cleanMime) {
+        String clean = rawName.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (clean.isEmpty()) {
+            clean = "download";
+        }
+        String ext = FileTypeFilter.getExtension(clean);
+        if (ext.isEmpty()) {
+            String guessed = FileTypeFilter.guessExtensionFromMime(cleanMime);
+            if (!guessed.isEmpty()) {
+                clean = clean + "." + guessed;
+            } else {
+                clean = clean + ".bin";
+            }
+        }
+        return clean;
     }
 
     /** Jika nama sudah ada, tambahkan (1), (2), ... agar file lama tidak tertimpa. */
@@ -177,6 +325,9 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
     }
 
     static String formatSize(long bytes) {
+        if (bytes < 0) {
+            return "-";
+        }
         if (bytes < 1024) {
             return bytes + " B";
         }
@@ -184,6 +335,33 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         if (kb < 1024) {
             return String.format("%.1f KB", kb);
         }
-        return String.format("%.2f MB", kb / 1024.0);
+        double mb = kb / 1024.0;
+        if (mb < 1024) {
+            return String.format("%.2f MB", mb);
+        }
+        return String.format("%.2f GB", mb / 1024.0);
+    }
+
+    static String formatSpeed(long bytesPerSec) {
+        if (bytesPerSec <= 0) {
+            return "0 B/dtk";
+        }
+        return formatSize(bytesPerSec) + "/dtk";
+    }
+
+    private static String formatEta(long remainingBytes, long speedBps) {
+        if (remainingBytes <= 0 || speedBps <= 0) {
+            return "";
+        }
+        long sec = remainingBytes / speedBps;
+        if (sec < 1) {
+            return " • <1 dtk";
+        }
+        if (sec < 60) {
+            return " • ~" + sec + " dtk";
+        }
+        long min = sec / 60;
+        long remSec = sec % 60;
+        return " • ~" + min + "m " + remSec + "d";
     }
 }

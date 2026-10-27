@@ -53,20 +53,10 @@ import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableRowSorter;
 
-/**
- * Tampilan (GUI) Modern aplikasi Download File.
- *
- * Fitur:
- * - Input URL + tombol Tempel (Paste) cepat
- * - Pilihan folder simpan + tombol Buka Folder
- * - Deteksi / Filter Jenis File Otomatis (ZIP .zip vs Non-ZIP) tanpa perlu dipilih manual
- * - Jika terdeteksi .zip (melalui ekstensi/MIME & Magic Number ZipHelper), ZipHelper otomatis bekerja
- * - Indikator progres real-time (persentase, ukuran, kecepatan unduh, jenis file)
- * - Tabel riwayat unduhan dengan pengelompokan jenis file (ZIP / Non-ZIP)
- */
+/** Jendela utama aplikasi Download File dengan deteksi ZIP otomatis dan tabel riwayat. */
 public class MainFrame extends JFrame {
 
-    // Palet warna modern
+    // Palet warna dan font antarmuka modern.
     private static final Color BG_MAIN = new Color(241, 245, 249);
     private static final Color BG_CARD = Color.WHITE;
     private static final Color BORDER_COLOR = new Color(226, 232, 240);
@@ -89,18 +79,16 @@ public class MainFrame extends JFrame {
     private static final Font FONT_SMALL = new Font("Segoe UI", Font.PLAIN, 11);
     private static final Font FONT_METRIC_VALUE = new Font("Segoe UI", Font.BOLD, 13);
 
-    // Komponen input
+    // Komponen input dan tombol pada form unduhan.
     private final JTextField urlField = new JTextField(30);
     private final JTextField folderField = new JTextField(30);
-
-    // Tombol aksi form
     private final JButton pasteButton = createNeutralButton("Tempel URL");
     private final JButton browseButton = createNeutralButton("Pilih Folder...");
     private final JButton openFolderTopButton = createNeutralButton("Buka Folder");
     private final JButton downloadButton = createAccentButton("Download Sekarang", ACCENT_BLUE, ACCENT_BLUE_HOVER);
     private final JButton cancelButton = createAccentButton("Batalkan", ACCENT_RED, ACCENT_RED_HOVER);
 
-    // Komponen progres & metrik
+    // Komponen indikator progres dan metrik unduhan.
     private final JLabel stateBadgeLabel = new JLabel("SIAP", SwingConstants.CENTER);
     private final JProgressBar progressBar = new JProgressBar(0, 100);
     private final JLabel statusLabel = new JLabel("Masukkan URL file lalu klik Download Sekarang.");
@@ -108,7 +96,7 @@ public class MainFrame extends JFrame {
     private final JLabel metricSizeValue = new JLabel("0 B / -");
     private final JLabel metricSpeedValue = new JLabel("0 B/dtk");
 
-    // Komponen Riwayat & Filter Tabel
+    // Komponen tabel riwayat unduhan dan filter jenis file.
     private final String[] tableColumns = {"Nama File", "Jenis File", "Ukuran", "Kecepatan", "Status", "Waktu"};
     private final DefaultTableModel historyModel = new DefaultTableModel(tableColumns, 0) {
         @Override
@@ -124,13 +112,13 @@ public class MainFrame extends JFrame {
     private final JTextField searchHistoryField = new JTextField(14);
     private final JLabel historyCountLabel = new JLabel("0 riwayat");
 
-    // Tombol aksi riwayat
+    // Tombol aksi untuk mengelola item pada tabel riwayat.
     private final JButton openFileButton = createNeutralButton("Buka File");
     private final JButton openFileFolderButton = createNeutralButton("Buka Lokasi");
     private final JButton extractSelectedButton = createNeutralButton("Ekstrak ZIP");
     private final JButton clearHistoryButton = createNeutralButton("Bersihkan Riwayat");
 
-    // Penyimpanan objek File per baris riwayat (selaras dengan index model)
+    // Daftar objek File yang tersimpan sesuai urutan baris tabel riwayat.
     private final List<File> historyFiles = new ArrayList<>();
 
     private DownloadWorker worker;
@@ -140,7 +128,7 @@ public class MainFrame extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         getContentPane().setBackground(BG_MAIN);
 
-        // Folder tujuan bawaan: ~/Downloads (atau folder home jika tidak ada)
+        // Atur folder tujuan bawaan ke folder Downloads pengguna.
         File home = new File(System.getProperty("user.home"));
         File downloads = new File(home, "Downloads");
         folderField.setText((downloads.isDirectory() ? downloads : home).getAbsolutePath());
@@ -156,15 +144,12 @@ public class MainFrame extends JFrame {
         setLocationRelativeTo(null);
     }
 
-    // ------------------------------------------------------------------
-    //  Konfigurasi komponen & gaya visual
-    // ------------------------------------------------------------------
+    // Mengatur tampilan visual untuk text field, progress bar, dan tabel riwayat.
     private void configureComponents() {
         styleTextField(urlField, "Contoh: https://contoh.com/arsip-data.zip");
         styleTextField(folderField, "Lokasi folder penyimpanan");
         styleTextField(searchHistoryField, "Cari nama file...");
 
-        // Progress bar modern
         progressBar.setStringPainted(true);
         progressBar.setString("0%");
         progressBar.setFont(new Font("Segoe UI", Font.BOLD, 12));
@@ -186,10 +171,8 @@ public class MainFrame extends JFrame {
 
         statusLabel.setFont(FONT_REGULAR);
         statusLabel.setForeground(TEXT_PRIMARY);
-
         cancelButton.setEnabled(false);
 
-        // Konfigurasi Tabel Riwayat
         historyTable.setRowSorter(rowSorter);
         historyTable.setFont(FONT_REGULAR);
         historyTable.setRowHeight(30);
@@ -206,13 +189,12 @@ public class MainFrame extends JFrame {
         header.setForeground(TEXT_SECONDARY);
         header.setPreferredSize(new Dimension(header.getPreferredSize().width, 32));
 
-        // Lebar kolom proporsional
-        historyTable.getColumnModel().getColumn(0).setPreferredWidth(230); // Nama File
-        historyTable.getColumnModel().getColumn(1).setPreferredWidth(95);  // Jenis File
-        historyTable.getColumnModel().getColumn(2).setPreferredWidth(95);  // Ukuran
-        historyTable.getColumnModel().getColumn(3).setPreferredWidth(95);  // Kecepatan
-        historyTable.getColumnModel().getColumn(4).setPreferredWidth(110); // Status
-        historyTable.getColumnModel().getColumn(5).setPreferredWidth(75);  // Waktu
+        historyTable.getColumnModel().getColumn(0).setPreferredWidth(230);
+        historyTable.getColumnModel().getColumn(1).setPreferredWidth(95);
+        historyTable.getColumnModel().getColumn(2).setPreferredWidth(95);
+        historyTable.getColumnModel().getColumn(3).setPreferredWidth(95);
+        historyTable.getColumnModel().getColumn(4).setPreferredWidth(110);
+        historyTable.getColumnModel().getColumn(5).setPreferredWidth(75);
 
         DefaultTableCellRenderer cellRenderer = new DefaultTableCellRenderer() {
             @Override
@@ -227,13 +209,13 @@ public class MainFrame extends JFrame {
                 }
 
                 String text = (value != null) ? value.toString() : "";
-                if (column == 1) { // Jenis File (ZIP vs Non-ZIP)
+                if (column == 1) {
                     setHorizontalAlignment(SwingConstants.CENTER);
                     setFont(FONT_LABEL);
                     if (!isSelected) {
                         setForeground(getCategoryColor(text));
                     }
-                } else if (column == 4) { // Status
+                } else if (column == 4) {
                     setHorizontalAlignment(SwingConstants.CENTER);
                     setFont(FONT_LABEL);
                     if (!isSelected) {
@@ -258,16 +240,11 @@ public class MainFrame extends JFrame {
         historyCategoryFilter.setBackground(Color.WHITE);
     }
 
-    // ------------------------------------------------------------------
-    //  Susunan tampilan (Modern Dashboard Layout)
-    // ------------------------------------------------------------------
+    // Menyusun tata letak utama yang terdiri dari header dan tiga panel kartu.
     private void buildLayout() {
         setLayout(new BorderLayout(0, 0));
-
-        // 1. Header Banner di bagian atas
         add(buildHeaderPanel(), BorderLayout.NORTH);
 
-        // 2. Konten utama (3 Card)
         JPanel mainContent = new JPanel(new BorderLayout(0, 12));
         mainContent.setBackground(BG_MAIN);
         mainContent.setBorder(new EmptyBorder(14, 16, 16, 16));
@@ -276,12 +253,9 @@ public class MainFrame extends JFrame {
         topCards.setLayout(new BoxLayout(topCards, BoxLayout.Y_AXIS));
         topCards.setOpaque(false);
 
-        JPanel formCard = buildFormCard();
-        JPanel progressCard = buildProgressCard();
-
-        topCards.add(formCard);
+        topCards.add(buildFormCard());
         topCards.add(Box.createVerticalStrut(12));
-        topCards.add(progressCard);
+        topCards.add(buildProgressCard());
 
         mainContent.add(topCards, BorderLayout.NORTH);
         mainContent.add(buildHistoryCard(), BorderLayout.CENTER);
@@ -325,7 +299,6 @@ public class MainFrame extends JFrame {
         titleBox.add(Box.createVerticalStrut(4));
         titleBox.add(subtitleLabel);
 
-        // Status Badge di kanan header
         stateBadgeLabel.setFont(new Font("Segoe UI", Font.BOLD, 11));
         stateBadgeLabel.setForeground(Color.WHITE);
         stateBadgeLabel.setOpaque(true);
@@ -357,7 +330,6 @@ public class MainFrame extends JFrame {
         c.insets = new Insets(5, 4, 5, 4);
         c.fill = GridBagConstraints.HORIZONTAL;
 
-        // Baris 1: URL File
         c.gridx = 0; c.gridy = 0; c.weightx = 0; c.gridwidth = 1;
         form.add(createFormLabel("URL File:"), c);
 
@@ -367,7 +339,6 @@ public class MainFrame extends JFrame {
         c.gridx = 3; c.weightx = 0; c.gridwidth = 1;
         form.add(pasteButton, c);
 
-        // Baris 2: Folder Tujuan
         c.gridx = 0; c.gridy = 1; c.weightx = 0; c.gridwidth = 1;
         form.add(createFormLabel("Simpan ke:"), c);
 
@@ -380,7 +351,6 @@ public class MainFrame extends JFrame {
         c.gridx = 3; c.weightx = 0; c.gridwidth = 1;
         form.add(openFolderTopButton, c);
 
-        // Baris 3: Tombol Aksi
         JPanel actionButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         actionButtons.setOpaque(false);
         actionButtons.add(cancelButton);
@@ -423,7 +393,6 @@ public class MainFrame extends JFrame {
         JPanel card = createCardPanel();
         card.setLayout(new BorderLayout(0, 10));
 
-        // Toolbar atas: judul + filter tampilan riwayat + pencarian
         JPanel topBar = new JPanel(new BorderLayout(12, 0));
         topBar.setOpaque(false);
 
@@ -460,12 +429,10 @@ public class MainFrame extends JFrame {
         topBar.add(titleGroup, BorderLayout.WEST);
         topBar.add(filterGroup, BorderLayout.EAST);
 
-        // Tabel dengan scroll pane
         JScrollPane scrollPane = new JScrollPane(historyTable);
         scrollPane.setBorder(BorderFactory.createLineBorder(BORDER_COLOR, 1));
         scrollPane.getViewport().setBackground(Color.WHITE);
 
-        // Toolbar bawah: aksi terhadap file terpilih
         JPanel bottomBar = new JPanel(new BorderLayout());
         bottomBar.setOpaque(false);
 
@@ -489,15 +456,13 @@ public class MainFrame extends JFrame {
         return card;
     }
 
-    // ------------------------------------------------------------------
-    //  Event Listeners
-    // ------------------------------------------------------------------
+    // Memasang event listener untuk seluruh tombol, input, dan tabel riwayat.
     private void addListeners() {
         pasteButton.addActionListener(e -> pasteUrlFromClipboard());
         browseButton.addActionListener(e -> chooseFolder());
         openFolderTopButton.addActionListener(e -> openDirectory(new File(folderField.getText().trim())));
         downloadButton.addActionListener(e -> startDownload());
-        urlField.addActionListener(e -> startDownload());      // tekan Enter = Download
+        urlField.addActionListener(e -> startDownload());
 
         cancelButton.addActionListener(e -> {
             if (worker != null) {
@@ -505,7 +470,6 @@ public class MainFrame extends JFrame {
             }
         });
 
-        // Filter tampilan tabel riwayat
         historyCategoryFilter.addActionListener(e -> applyHistoryTableFilter());
         searchHistoryField.getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -578,9 +542,7 @@ public class MainFrame extends JFrame {
         }
     }
 
-    // ------------------------------------------------------------------
-    //  Proses Download & Deteksi Otomatis ZIP vs Non-ZIP
-    // ------------------------------------------------------------------
+    // Memvalidasi input dan menjalankan proses download beserta deteksi ZIP otomatis.
     private void startDownload() {
         if (!downloadButton.isEnabled()) {
             return;
@@ -638,7 +600,7 @@ public class MainFrame extends JFrame {
                 updateBadge("SELESAI", ACCENT_GREEN);
                 statusLabel.setText("Download selesai: " + file.getName());
 
-                // Deteksi akhir menggunakan ZipHelper.isZip(file) (magic number 0x504B0304)
+                // Verifikasi jenis file menggunakan ZipHelper (magic number 0x504B0304).
                 boolean isZipFile = ZipHelper.isZip(file);
                 String catLabel = isZipFile ? FileTypeFilter.LABEL_ZIP : FileTypeFilter.LABEL_NON_ZIP;
                 String sizeText = DownloadWorker.formatSize(file.length());
@@ -657,7 +619,6 @@ public class MainFrame extends JFrame {
                         file
                 );
 
-                // Pop-up download selesai beserta hasil deteksi jenis file
                 JOptionPane.showMessageDialog(MainFrame.this,
                         "Download selesai!\n\n"
                                 + "Nama File        : " + file.getName() + "\n"
@@ -666,7 +627,7 @@ public class MainFrame extends JFrame {
                                 + "Lokasi Simpan    : " + file.getAbsolutePath(),
                         "Download Selesai", JOptionPane.INFORMATION_MESSAGE);
 
-                // Jika terdeteksi .zip, ZipHelper langsung bekerja
+                // Jika file terdeteksi sebagai ZIP, jalankan ekstraksi melalui ZipHelper.
                 if (isZipFile) {
                     askToExtract(file, historyIndex);
                 }
@@ -719,9 +680,7 @@ public class MainFrame extends JFrame {
         worker.execute();
     }
 
-    // ------------------------------------------------------------------
-    //  Ekstraksi ZIP melalui ZipHelper
-    // ------------------------------------------------------------------
+    // Menampilkan dialog konfirmasi dan mengekstrak file ZIP di thread terpisah menggunakan ZipHelper.
     private void askToExtract(File zipFile, int historyModelRow) {
         Object[] options = {"Ekstrak dengan ZipHelper", "Jangan Ekstrak"};
         int choice = JOptionPane.showOptionDialog(this,
@@ -744,7 +703,6 @@ public class MainFrame extends JFrame {
         progressBar.setString("ZipHelper mengekstrak...");
         statusLabel.setText("ZipHelper sedang mengekstrak " + zipFile.getName() + "...");
 
-        // Ekstraksi di thread terpisah supaya GUI tetap responsif
         new SwingWorker<File, Void>() {
             @Override
             protected File doInBackground() throws Exception {
@@ -783,9 +741,7 @@ public class MainFrame extends JFrame {
         }.execute();
     }
 
-    // ------------------------------------------------------------------
-    //  Manajemen Riwayat & Filter Tabel
-    // ------------------------------------------------------------------
+    // Menambahkan baris riwayat unduhan baru dan memperbarui filter tabel.
     private int addHistoryEntry(String fileName, String category, String size, String speed, String status, File file) {
         String timeStr = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         String cleanName = (fileName == null || fileName.equals("-")) ? "Tidak diketahui" : fileName;
@@ -908,9 +864,7 @@ public class MainFrame extends JFrame {
         }
     }
 
-    // ------------------------------------------------------------------
-    //  Fungsi bantu GUI & Komponen Kustom
-    // ------------------------------------------------------------------
+    // Fungsi bantu untuk mengatur status komponen dan membuat elemen UI kustom.
     private void setBusy(boolean busy) {
         downloadButton.setEnabled(!busy);
         browseButton.setEnabled(!busy);

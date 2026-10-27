@@ -15,22 +15,12 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import javax.swing.SwingWorker;
 
-/**
- * Proses download file yang berjalan di thread terpisah (SwingWorker),
- * supaya tampilan GUI tidak "freeze" dan progress bar bisa bergerak.
- *
- * Pola download sama dengan Modul 2:
- *   URL -> URLConnection -> getInputStream() -> FileOutputStream
- * dengan buffer 4096 byte dan try-with-resources (Modul 1).
- *
- * Dilengkapi deteksi otomatis jenis file (ZIP vs Non-ZIP) menggunakan
- * HTTP Header serta ZipHelper (magic number 0x504B0304).
- */
+/** Pekerja background (SwingWorker) untuk mengunduh file dan mendeteksi jenis file tanpa membekukan GUI. */
 public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
 
-    /** Data kemajuan yang dikirim dari thread download ke thread GUI. */
+    /** Data kemajuan unduhan yang dikirim dari thread background ke thread GUI. */
     public static class Update {
-        final int percent;          // 0-100, atau -1 jika ukuran file tidak diketahui
+        final int percent;
         final String status;
         final String sizeInfo;
         final String speedInfo;
@@ -45,7 +35,7 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         }
     }
 
-    /** Dipanggil di thread GUI, jadi aman untuk mengubah komponen Swing. */
+    /** Antarmuka callback yang dipanggil di thread GUI untuk memperbarui tampilan. */
     public interface Listener {
         void onUpdate(int percent, String status);
         default void onDetailedUpdate(Update update) {
@@ -94,20 +84,18 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         return averageSpeedText;
     }
 
-    // ------------------------------------------------------------------
-    //  Dijalankan di thread terpisah (bukan thread GUI)
-    // ------------------------------------------------------------------
+    // Menjalankan proses pengunduhan file di thread terpisah.
     @Override
     @SuppressWarnings("deprecation")
     protected File doInBackground() throws Exception {
-        URL url = new URL(urlText);     // MalformedURLException jika format URL salah
+        URL url = new URL(urlText);
 
         URLConnection connection = url.openConnection();
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(15000);
         connection.setRequestProperty("User-Agent", "Mozilla/5.0");
 
-        // Jika HTTP, pastikan server menjawab 200 OK (bukan 404, 403, dst.)
+        // Pastikan server HTTP mengembalikan kode status 200 OK.
         if (connection instanceof HttpURLConnection) {
             int code = ((HttpURLConnection) connection).getResponseCode();
             if (code != HttpURLConnection.HTTP_OK) {
@@ -123,7 +111,7 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         detectedFileName = resolvedName;
         detectedCategory = FileTypeFilter.detectCategoryLabel(resolvedName, detectedContentType, null);
 
-        long total = connection.getContentLengthLong();     // -1 jika tidak diketahui
+        long total = connection.getContentLengthLong();
 
         if (!folder.exists() && !folder.mkdirs()) {
             throw new IOException("Folder tujuan tidak dapat dibuat: " + folder);
@@ -183,13 +171,13 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
             double totalElapsedSec = Math.max(0.05, (System.nanoTime() - startTimeNs) / 1_000_000_000.0);
             averageSpeedText = formatSpeed((long) (totalRead / totalElapsedSec));
         } finally {
-            // Jika gagal atau dibatalkan, jangan tinggalkan file setengah jadi
+            // Hapus file jika proses unduhan gagal atau dibatalkan.
             if (!finished && target.exists()) {
                 target.delete();
             }
         }
 
-        // Setelah stream ditutup, periksa apakah file adalah ZIP menggunakan ZipHelper (magic number 0x504B0304)
+        // Ubah ekstensi .bin menjadi .zip jika magic number file terdeteksi sebagai ZIP oleh ZipHelper.
         if (ZipHelper.isZip(target) && target.getName().endsWith(".bin")) {
             String baseName = target.getName().substring(0, target.getName().length() - 4);
             File renamedZip = uniqueFile(folder, baseName + ".zip");
@@ -203,15 +191,14 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         return target;
     }
 
-    // ------------------------------------------------------------------
-    //  Dijalankan di thread GUI
-    // ------------------------------------------------------------------
+    // Meneruskan pembaruan progres terakhir ke komponen GUI.
     @Override
     protected void process(List<Update> updates) {
         Update last = updates.get(updates.size() - 1);
         listener.onDetailedUpdate(last);
     }
 
+    // Menangani penyelesaian, pembatalan, atau error setelah proses background berakhir.
     @Override
     protected void done() {
         try {
@@ -226,14 +213,7 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         }
     }
 
-    // ------------------------------------------------------------------
-    //  Fungsi bantu
-    // ------------------------------------------------------------------
-
-    /**
-     * Menentukan nama file dari header Content-Disposition atau dari path URL,
-     * serta melengkapi ekstensi berdasarkan MIME Content-Type jika belum ada.
-     */
+    /** Menentukan nama file dari header Content-Disposition atau dari path URL. */
     private static String resolveFileName(URL url, URLConnection connection, String cleanMime) {
         String disposition = connection.getHeaderField("Content-Disposition");
         if (disposition != null) {
@@ -276,7 +256,7 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         return "";
     }
 
-    /** Mengambil nama file dari path URL. Contoh: .../a/data.zip -> data.zip */
+    /** Mengambil nama file dari bagian akhir path URL. */
     private static String fileNameFromUrl(URL url) {
         String path = url.getPath();
         try {
@@ -307,7 +287,7 @@ public class DownloadWorker extends SwingWorker<File, DownloadWorker.Update> {
         return clean;
     }
 
-    /** Jika nama sudah ada, tambahkan (1), (2), ... agar file lama tidak tertimpa. */
+    /** Menambahkan nomor urut (1), (2), dst. jika nama file sudah ada di folder tujuan. */
     static File uniqueFile(File folder, String name) {
         File f = new File(folder, name);
         if (!f.exists()) {

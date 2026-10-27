@@ -8,23 +8,16 @@ import java.io.OutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/**
- * Pengecekan dan ekstraksi file ZIP.
- */
+/** Kelas bantu untuk mendeteksi dan mengekstrak file ZIP. */
 public class ZipHelper {
 
     private static final int BUFFER_SIZE = 4096;
 
-    // Empat byte pertama file ZIP: 'P' 'K' 0x03 0x04 (ZIP biasa)
-    // atau 'P' 'K' 0x05 0x06 (ZIP kosong)
+    // Empat byte pertama signature file ZIP biasa dan ZIP kosong.
     private static final int ZIP_SIGNATURE = 0x504B0304;
     private static final int ZIP_EMPTY_SIGNATURE = 0x504B0506;
 
-    /**
-     * Memeriksa apakah file adalah ZIP dengan membaca 4 byte pertamanya
-     * (magic number), bukan hanya melihat ekstensi.
-     * Memakai DataInputStream (Modul 2): readInt() membaca 4 byte sekaligus.
-     */
+    /** Memeriksa apakah file adalah ZIP dengan membaca 4 byte pertamanya (magic number). */
     public static boolean isZip(File file) {
         if (file == null || !file.isFile() || file.length() < 4) {
             return false;
@@ -37,12 +30,7 @@ public class ZipHelper {
         }
     }
 
-    /**
-     * Mengekstrak ZIP ke folder baru di samping file ZIP-nya.
-     * Contoh: data.zip -> folder "data".
-     *
-     * @return folder hasil ekstraksi
-     */
+    /** Mengekstrak isi file ZIP ke folder baru di samping file ZIP tersebut. */
     public static File extract(File zipFile) throws IOException {
         String name = zipFile.getName();
         int dot = name.lastIndexOf('.');
@@ -59,7 +47,7 @@ public class ZipHelper {
             while ((entry = zin.getNextEntry()) != null) {
                 File outFile = new File(destDir, entry.getName());
 
-                // Cegah "Zip Slip": entry bernama ../../x tidak boleh keluar dari folder tujuan
+                // Cegah Zip Slip agar entry tidak keluar dari folder tujuan.
                 if (!outFile.getCanonicalPath().startsWith(destPath)) {
                     throw new IOException("Entry ZIP tidak aman: " + entry.getName());
                 }

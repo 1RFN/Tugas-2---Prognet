@@ -1,12 +1,5 @@
-import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.io.*;
+import java.util.zip.*;
 
 /** Kelas bantu untuk mendeteksi dan mengekstrak file ZIP. */
 public class ZipHelper {
